@@ -1,53 +1,51 @@
-// Simple Pair Code Session Generator for Baileys
-const express = require('express');
-const { default: makeWASocket, useMultiFileAuthState, delay, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys");
-const pino = require("pino");
-const fs = require("fs");
+const { default: makeWASocket, useMultiFileAuthState, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys")
+const pino = require("pino")
+const readline = require("readline")
 
-const app = express();
-app.use(express.json());
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+const question = (text) => new Promise((resolve) => rl.question(text, resolve))
 
-app.get('/', (req,res) => {
-  res.send(`
-  <h2>LIYA-MD Session Generator</h2>
-  <input id="num" placeholder="9477xxxxxxx">
-  <button onclick="getCode()">Get Pair Code</button>
-  <pre id="out"></pre>
-  <script>
-  async function getCode(){
-    let n=document.getElementById('num').value;
-    let r=await fetch('/pair?number='+n);
-    let d=await r.json();
-    document.getElementById('out').innerText=JSON.stringify(d,null,2);
-  }
-  </script>`)
-});
-
-app.get('/pair', async (req,res) => {
-  let num = req.query.number.replace(/[^0-9]/g,'');
-  const { state, saveCreds } = await useMultiFileAuthState('./session/'+num);
-  const sock = makeWASocket({
-    logger: pino({level:"silent"}),
-    auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, pino({level:"silent"})) },
-    printQRInTerminal: false,
-    browser: ["LIYA-MD", "Chrome", "1.0.0"]
-  });
-
-  if(!sock.authState.creds.registered){
-    await delay(1500);
-    let code = await sock.requestPairingCode(num);
-    res.json({ pairCode: code, message: "WhatsApp -> Linked Devices -> Link with phone number -> Enter this code" });
-  }
+async function start() {
+  console.log("Running Liya Session Generator...")
+  const { state, saveCreds } = await useMultiFileAuthState("./auth")
   
-  sock.ev.on("creds.update", saveCreds);
-  sock.ev.on("connection.update", async (u) => {
-    if(u.connection === "open"){
-      let credsFile = fs.readFileSync('./session/'+num+'/creds.json');
-      let sessionID = Buffer.from(credsFile).toString('base64'); // මේක තමයි SESSION_ID
-      console.log("SESSION_ID:", "LIYA~" + sessionID);
-      // මෙතන ඔයාට session එක display කරන්න පුලුවන්
-    }
-  });
-});
+  const sock = makeWASocket({
+    logger: pino({ level: "silent" }),
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" }))
+    },
+    printQRInTerminal: false,
+    browser: ["Ubuntu", "Chrome", "20.0.04"]
+  })
 
-app.listen(3000, ()=> console.log("Running"));
+  sock.ev.on("creds.update", saveCreds)
+
+  if (!sock.authState.creds.registered) {
+    let phoneNumber = await question("Enter your WhatsApp number with country code (ex: 9471xxxxxxx): ")
+    phoneNumber = phoneNumber.replace(/[^0-9]/g, "")
+    
+    console.log("Requesting Pair Code...")
+    setTimeout(async () => {
+      try {
+        const code = await sock.requestPairingCode(phoneNumber)
+        console.log("\n==============================")
+        console.log("YOUR PAIR CODE: " + code)
+        console.log("==============================")
+        console.log("\nGo to WhatsApp > Linked Devices > Link with phone number and enter this code!")
+      } catch (e) {
+        console.log("Error: ", e.message)
+      }
+    }, 3000)
+  }
+
+  sock.ev.on("connection.update", async (s) => {
+    if (s.connection === "open") {
+      console.log("\n✅ Connected! Check your WhatsApp, session will be sent there.")
+      // Here you can add code to send creds file
+      setTimeout(() => process.exit(0), 5000)
+    }
+  })
+}
+
+start()
